@@ -22,7 +22,7 @@ It provides real-time previews, smart defaults, and an undo-friendly workflow.
 ---
 
 ## 🛠 Installation
-1. Download the latest release as a `.zip` from [Releases](https://github.com/oseyiajibare/hole_inner_plugin/releases).
+1. Download the latest release as a `.zip` from [Releases](https://github.com/oseyiajibare/Hole_inner/releases).
 2. In QGIS, go to **Plugins → Manage and Install Plugins → Install from ZIP**.
 3. Select the downloaded file and click **Install Plugin**.
 4. Activate it via **Plugins → Hole vs Inner Polygon Tool**.
