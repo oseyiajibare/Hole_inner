@@ -1,17 +1,17 @@
 [general]
-name=Hole vs Inner Polygon Tool
-description=A QGIS digitizing tool that lets users decide whether a polygon inside another polygon becomes a hole (subtracted) or an inner feature (added).
-version=1.0.0
-qgisMinimumVersion=3.16
-qgisMaximumVersion=3.99
+name=Hole_Inner
+qgisMinimumVersion=3.0
+version=1.2
 author=Seyi Ajibare
 email=oseyiajibare@gmail.com
-about=This plugin enhances polygon editing in QGIS by providing a contextual menu and live preview for deciding between creating holes or inner features.
-category=Digitizing
-tags=polygon,editing,hole,inner feature,qgis
-homepage=https://github.com/oseyiajibare/Hole_inner
-tracker=https://github.com/oseyiajibare/Hole_inner/issues
-repository=https://github.com/oseyiajibare/Hole_innern.git
+description=Tool for digitizing a polygon as either a hole (cut-out) or inner isolated polygon with snapping and undo-friendly behavior.
+about=Digitizing tool for QGIS that lets the user create either a hole in a parent polygon or an independent inner polygon. Supports snapping, preview, and safeguards for editing sessions.
+Requirements: polygon layer in edit mode, no external Python dependencies.
+category=Digitising tools
 icon=icon.png
-experimental=False
-deprecated=False
+license=GPL-3
+homepage=https://github.com/oseyiajibare/Hole_inner
+repository=https://github.com/oseyiajibare/Hole_inner
+tracker=https://github.com/oseyiajibare/Hole_inner/issues
+tags=editing,digitising,geometry,topology
+
