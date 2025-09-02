@@ -1,0 +1,378 @@
+
+from qgis.PyQt.QtCore import Qt, QPoint, QSettings
+from qgis.PyQt.QtWidgets import QAction, QMenu, QMessageBox, QInputDialog, QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton, QFormLayout, QComboBox, QWidget, QHBoxLayout, QCheckBox
+from qgis.PyQt.QtGui import QCursor, QIcon, QColor
+from qgis.core import (
+    QgsProject,
+    QgsFeature,
+    QgsGeometry,
+    QgsPointXY,
+    QgsWkbTypes,
+    QgsRectangle,
+    QgsFeatureRequest,
+    QgsVectorLayerEditUtils,
+    QgsEditFormConfig,
+)
+from qgis.gui import QgsMapTool, QgsRubberBand, QgsVertexMarker
+
+class OptionsDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Hole vs Inner - Options")
+        self.layout = QVBoxLayout()
+        form = QFormLayout()
+
+        self.default_mode = QComboBox()
+        self.default_mode.addItems(["Smart (auto)", "Prefer Hole", "Prefer Inner"])
+        form.addRow("Default mode:", self.default_mode)
+
+        self.snap_checkbox = QCheckBox("Enable snapping to parent boundary by default")
+        self.snap_checkbox.setChecked(True)
+        form.addRow(self.snap_checkbox)
+
+        self.confirm_before_commit = QCheckBox("Ask for confirmation before committing edits")
+        self.confirm_before_commit.setChecked(True)
+        form.addRow(self.confirm_before_commit)
+
+        self.layout.addLayout(form)
+        btn_layout = QHBoxLayout()
+        self.save_btn = QPushButton("Save")
+        self.cancel_btn = QPushButton("Cancel")
+        btn_layout.addWidget(self.save_btn)
+        btn_layout.addWidget(self.cancel_btn)
+        self.layout.addLayout(btn_layout)
+        self.setLayout(self.layout)
+
+        self.save_btn.clicked.connect(self.accept)
+        self.cancel_btn.clicked.connect(self.reject)
+
+    def load_settings(self):
+        s = QSettings()
+        self.default_mode.setCurrentIndex(int(s.value("hole_inner/default_mode", 0)))
+        self.snap_checkbox.setChecked(s.value("hole_inner/snap", True, type=bool))
+        self.confirm_before_commit.setChecked(s.value("hole_inner/confirm", True, type=bool))
+
+    def save_settings(self):
+        s = QSettings()
+        s.setValue("hole_inner/default_mode", self.default_mode.currentIndex())
+        s.setValue("hole_inner/snap", self.snap_checkbox.isChecked())
+        s.setValue("hole_inner/confirm", self.confirm_before_commit.isChecked())
+
+class AttributeFormDialog(QDialog):
+    def __init__(self, fields, parent_attrs=None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Attribute Mapping for Inner Feature")
+        self.layout = QVBoxLayout()
+        self.form = QFormLayout()
+        self.inputs = {}
+        for f in fields:
+            le = QLineEdit()
+            if parent_attrs and f['name'] in parent_attrs:
+                le.setText(str(parent_attrs[f['name']]))
+            self.form.addRow(f['name'], le)
+            self.inputs[f['name']] = le
+        self.layout.addLayout(self.form)
+        btn_layout = QHBoxLayout()
+        ok = QPushButton("OK")
+        cancel = QPushButton("Cancel")
+        btn_layout.addWidget(ok)
+        btn_layout.addWidget(cancel)
+        self.layout.addLayout(btn_layout)
+        self.setLayout(self.layout)
+        ok.clicked.connect(self.accept)
+        cancel.clicked.connect(self.reject)
+
+    def values(self):
+        return {k: v.text() for k, v in self.inputs.items()}
+
+class HoleInnerMapTool(QgsMapTool):
+    def __init__(self, canvas, plugin):
+        super().__init__(canvas)
+        self.canvas = canvas
+        self.plugin = plugin
+        self.points = []
+        self.rubberBand = QgsRubberBand(self.canvas, QgsWkbTypes.PolygonGeometry)
+        self.rubberBand.setWidth(2)
+        self.fillColor = QColor(0,0,0,0)
+        self.rubberBand.setFillColor(self.fillColor)
+        self.active_parent_feat = None
+        self.parent_layer = None
+        self.mode = None  # 'hole' or 'inner' or None
+        self.log = []
+        self.vertexMarker = QgsVertexMarker(self.canvas)
+        self.vertexMarker.setIconSize(6)
+        self.vertexMarker.setColor(QColor(255,0,0))
+        self.vertexMarker.setVisible(False)
+
+    def canvasPressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            pt = self.toMapCoordinates(event.pos())
+            if not self.points:
+                parent, layer = self.plugin.find_parent_polygon(pt)
+                self.active_parent_feat = parent
+                self.parent_layer = layer
+                if parent is None or layer is None:
+                    QMessageBox.information(None, "HoleInnerTool", "Click inside an existing polygon to begin (select a polygon layer).")
+                    return
+                # show contextual menu
+                self.show_mode_menu(event.pos(), pt)
+            self.points.append(pt)
+            self.update_preview()
+        elif event.button() == Qt.RightButton:
+            # finish drawing on right click (alternative to Enter)
+            if self.points:
+                self.finish()
+
+    def canvasMoveEvent(self, event):
+        pt = self.toMapCoordinates(event.pos())
+        if self.points:
+            coords = self.points + [pt]
+            try:
+                self.rubberBand.setToGeometry(QgsGeometry.fromPolygonXY([coords]), None)
+            except Exception:
+                pass
+            self.vertexMarker.setCenter(pt)
+            self.vertexMarker.setVisible(True)
+            # determine suggestion
+            if self.active_parent_feat:
+                parent_geom = self.active_parent_feat.geometry()
+                preview_geom = QgsGeometry.fromPolygonXY([coords])
+                if preview_geom.touches(parent_geom) or preview_geom.crosses(parent_geom) or not preview_geom.within(parent_geom):
+                    suggested = 'hole'
+                else:
+                    suggested = 'inner'
+                if self.mode is None:
+                    self.set_preview_color(suggested)
+                else:
+                    self.set_preview_color(self.mode)
+        else:
+            self.vertexMarker.setVisible(False)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            self.finish()
+        if event.key() == Qt.Key_Backspace:
+            if self.points:
+                self.points.pop()
+                self.update_preview()
+        if event.key() == Qt.Key_Escape:
+            self.clear()
+
+    def finish(self):
+        if len(self.points) < 3:
+            QMessageBox.warning(None, "HoleInnerTool", "Draw at least 3 points.")
+            return
+        geom = QgsGeometry.fromPolygonXY([self.points])
+        if not geom.isGeosValid():
+            QMessageBox.warning(None, "HoleInnerTool", "Invalid geometry (self-intersection).")
+            self.set_preview_color('invalid')
+            return
+        # decide mode based on settings and relations
+        s = QSettings()
+        default_mode_idx = int(s.value("hole_inner/default_mode", 0))
+        if self.mode is None:
+            if default_mode_idx == 1:
+                self.mode = 'hole'
+            elif default_mode_idx == 2:
+                self.mode = 'inner'
+            else:
+                parent_geom = self.active_parent_feat.geometry()
+                if geom.touches(parent_geom) or not geom.within(parent_geom):
+                    self.mode = 'hole'
+                else:
+                    self.mode = 'inner'
+        # perform action with undo-friendly pattern
+        if self.mode == 'inner':
+            self.add_inner_feature(geom)
+        else:
+            self.create_hole_in_parent(geom)
+        self.log.append({'action': self.mode, 'wkt': geom.asWkt()})
+        self.clear()
+
+    def add_inner_feature(self, geom):
+        layer = self.parent_layer
+        # prepare edit operation with undo support if available
+        if not layer.isEditable():
+            layer.startEditing()
+            started_here = True
+        else:
+            started_here = False
+        # attribute mapping dialog
+        fields = [{'name': f.name()} for f in layer.fields()]
+        parent_attrs = {}
+        try:
+            for i, f in enumerate(layer.fields()):
+                parent_attrs[f.name()] = self.active_parent_feat.attribute(i)
+        except Exception:
+            parent_attrs = None
+        attr_dialog = AttributeFormDialog(fields, parent_attrs)
+        if attr_dialog.exec_() != QDialog.Accepted:
+            if started_here:
+                layer.rollBack()
+            return
+        values = attr_dialog.values()
+        feat = QgsFeature(layer.fields())
+        feat.setGeometry(geom)
+        # set attributes from form where possible
+        attrs = [None]*layer.fields().count()
+        for idx, f in enumerate(layer.fields()):
+            val = values.get(f.name())
+            if val is not None:
+                attrs[idx] = val
+        feat.setAttributes(attrs)
+        layer.addFeature(feat)
+        layer.updateExtents()
+
+        s = QSettings()
+        confirm = s.value("hole_inner/confirm", True, type=bool)
+        if confirm:
+            ok = QMessageBox.question(None, "Confirm", "Commit changes to layer?", QMessageBox.Yes|QMessageBox.No)
+            if ok != QMessageBox.Yes:
+                if started_here:
+                    layer.rollBack()
+                return
+
+        layer.commitChanges()
+        QMessageBox.information(None, "HoleInnerTool", "Inner feature created. Use layer undo/redo if supported.")
+
+    def create_hole_in_parent(self, geom):
+        layer = self.parent_layer
+        if not layer.isEditable():
+            layer.startEditing()
+            started_here = True
+        else:
+            started_here = False
+        parent_geom = self.active_parent_feat.geometry()
+        new_parent_geom = parent_geom.difference(geom)
+        layer.changeGeometry(self.active_parent_feat.id(), new_parent_geom)
+        s = QSettings()
+        confirm = s.value("hole_inner/confirm", True, type=bool)
+        if confirm:
+            ok = QMessageBox.question(None, "Confirm", "Commit change (create hole) to parent feature?", QMessageBox.Yes|QMessageBox.No)
+            if ok != QMessageBox.Yes:
+                if started_here:
+                    layer.rollBack()
+                return
+        layer.commitChanges()
+        QMessageBox.information(None, "HoleInnerTool", "Hole created in parent polygon.")
+
+    def show_mode_menu(self, pos, map_point):
+        menu = QMenu()
+        hole_action = menu.addAction("🕳️ Create Hole")
+        inner_action = menu.addAction("🧱 Add Inner Feature")
+        settings_action = menu.addAction("⚙️ Options")
+        chosen = menu.exec_(QCursor.pos())
+        if chosen == hole_action:
+            self.mode = 'hole'
+            self.set_preview_color('hole')
+        elif chosen == inner_action:
+            self.mode = 'inner'
+            self.set_preview_color('inner')
+        elif chosen == settings_action:
+            dlg = OptionsDialog()
+            dlg.load_settings()
+            if dlg.exec_() == QDialog.Accepted:
+                dlg.save_settings()
+            # keep mode unset, let smart defaults decide
+            self.mode = None
+        else:
+            self.mode = None
+
+    def set_preview_color(self, mode):
+        if mode == 'invalid':
+            color = QColor(220, 20, 60, 100)  # redish
+            self.rubberBand.setColor(color)
+            self.rubberBand.setFillColor(color)
+        elif mode == 'hole':
+            color = QColor(30, 144, 255, 120)  # blue
+            self.rubberBand.setColor(color)
+            self.rubberBand.setFillColor(QColor(30,144,255,40))
+        elif mode == 'inner':
+            color = QColor(34, 139, 34, 120)  # green
+            self.rubberBand.setColor(color)
+            self.rubberBand.setFillColor(QColor(34,139,34,40))
+        else:
+            color = QColor(255,215,0,100)
+            self.rubberBand.setColor(color)
+            self.rubberBand.setFillColor(QColor(255,215,0,30))
+
+    def update_preview(self):
+        if not self.points:
+            self.rubberBand.reset(QgsWkbTypes.PolygonGeometry)
+            return
+        try:
+            self.rubberBand.setToGeometry(QgsGeometry.fromPolygonXY([self.points]), None)
+        except Exception:
+            pass
+
+    def clear(self):
+        self.points = []
+        self.rubberBand.reset(QgsWkbTypes.PolygonGeometry)
+        self.active_parent_feat = None
+        self.parent_layer = None
+        self.mode = None
+        self.vertexMarker.setVisible(False)
+
+class HoleInnerAdvancedPlugin:
+    def __init__(self, iface):
+        self.iface = iface
+        self.canvas = iface.mapCanvas()
+        self.tool = HoleInnerMapTool(self.canvas, self)
+        self.action = None
+        self.options_action = None
+
+    def initGui(self):
+        # load icon (svg preferred)
+        icon_path = self.plugin_dir() + "/icon.svg"
+        self.action = QAction(QIcon(icon_path), "Hole vs Inner (Advanced)", self.iface.mainWindow())
+        self.action.setCheckable(True)
+        self.action.triggered.connect(self.toggle)
+        self.iface.addToolBarIcon(self.action)
+        self.iface.addPluginToMenu("&HoleInnerAdvanced", self.action)
+
+        self.options_action = QAction("Hole vs Inner Options", self.iface.mainWindow())
+        self.options_action.triggered.connect(self.open_options)
+        self.iface.addPluginToMenu("&HoleInnerAdvanced", self.options_action)
+
+    def unload(self):
+        self.iface.removeToolBarIcon(self.action)
+        self.iface.removePluginMenu("&HoleInnerAdvanced", self.action)
+        self.iface.removePluginMenu("&HoleInnerAdvanced", self.options_action)
+
+    def toggle(self, checked):
+        if checked:
+            self.canvas.setMapTool(self.tool)
+        else:
+            self.canvas.unsetMapTool(self.tool)
+            self.action.setChecked(False)
+
+    def plugin_dir(self):
+        import os
+        return os.path.dirname(__file__)
+
+    def open_options(self):
+        dlg = OptionsDialog(self.iface.mainWindow())
+        dlg.load_settings()
+        if dlg.exec_() == QDialog.Accepted:
+            dlg.save_settings()
+    def find_parent_polygon(self, point):
+        from qgis.core import QgsProject, QgsFeatureRequest, QgsRectangle, QgsWkbTypes
+        layers = [l for l in QgsProject.instance().mapLayers().values()
+                  if l.type() == l.VectorLayer and l.geometryType() == QgsWkbTypes.PolygonGeometry]
+        visible_layers = []
+        for layer in layers:
+            node = QgsProject.instance().layerTreeRoot().findLayer(layer.id())
+            if node and node.isVisible():
+                visible_layers.append(layer)
+        for layer in visible_layers:
+            rect = QgsRectangle(point.x()-0.0001, point.y()-0.0001, point.x()+0.0001, point.y()+0.0001)
+            request = QgsFeatureRequest().setFilterRect(rect)
+            for feat in layer.getFeatures(request):
+                if feat.geometry().contains(point):
+                    return feat, layer
+        for layer in layers:
+            for feat in layer.getFeatures():
+                if feat.geometry().contains(point):
+                    return feat, layer
+        return None, None
+
