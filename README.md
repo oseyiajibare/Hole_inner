@@ -1,81 +1,66 @@
-# Hole vs Inner Polygon Tool (QGIS Plugin)
+# Hole_Inner QGIS Plugin
 
-## 📌 Overview
-This QGIS plugin improves polygon digitizing workflows by allowing users to easily choose whether a new polygon inside an existing one should:
-- 🕳️ Become a **hole** (subtracting area)
-- 🧱 Become an **inner feature** (independent geometry inside parent)
+**Hole_Inner** is a QGIS plugin that lets users digitize either a *hole* (cut-out) inside an existing polygon or an *inner* (independent) polygon inside a parent polygon. It supports snapping, preview, and is designed to be undo-friendly when used inside QGIS edit sessions.
 
-It provides real-time previews, smart defaults, and an undo-friendly workflow.
+## Features
+- Create a hole (cut out) from a selected parent polygon.
+- Create an inner (standalone) polygon inside a parent polygon.
+- Snapping support and preview while digitizing.
+- Undo-friendly: designed to work within QGIS editing framework.
 
----
+## Requirements
+- QGIS 3.x (tested with 3.16+).
+- A polygon vector layer enabled for editing and set as the active layer.
+- **No external Python dependencies** (pure PyQGIS and standard library).
 
-## ✨ Features
-- **Contextual Menu**: Choose "Create Hole" or "Add Inner Feature" after drawing.
-- **Smart Defaults**: Suggests hole if touching boundary, inner feature if fully inside.
-- **Live Preview**: 
-  - 🔴 Red = invalid geometry  
-  - 🔵 Blue = hole  
-  - 🟢 Green = inner feature
-- **Undo-Friendly**: Every action can be reverted with `Ctrl+Z`.
-- **Attribute Linking**: Inner features can inherit attributes from parent polygon.
+## Installation (for testing)
+1. Download the ZIP and extract the folder `Hole_Inner` into your QGIS plugins directory (on Windows typically `%APPDATA%\QGIS\QGIS3\profiles\default\python\plugins\`).
+2. Restart QGIS and enable the plugin from `Plugins > Manage and Install Plugins`.
+3. Open a polygon layer, toggle editing, and activate the Hole_Inner tool from the toolbar or Plugins menu.
 
----
+## Quick usage
+1. Start editing on your target polygon layer (the parent polygon layer).
+2. Activate the plugin tool (toolbar or Plugins menu).
+3. Digitize a polygon inside the parent polygon. Choose whether to create a *Hole* or an *Inner* polygon in the plugin options.
+4. Save edits to apply changes.
 
-## 🛠 Installation
-1. Download the latest release as a `.zip` from [Releases](https://github.com/oseyiajibare/Hole_inner/releases).
-2. In QGIS, go to **Plugins → Manage and Install Plugins → Install from ZIP**.
-3. Select the downloaded file and click **Install Plugin**.
-4. Activate it via **Plugins → Hole vs Inner Polygon Tool**.
+## Test data
+A small sample GeoJSON file `test_data.geojson` is included for quick testing (2 polygons). Load it into QGIS and use the plugin to create holes or inner polygons within the sample features.
 
----
-
-## 🚀 Usage
-1. Select a polygon layer.
-2. Click inside an existing polygon.
-3. A menu appears with:
-   - 🕳️ **Create Hole**
-   - 🧱 **Add Inner Feature**
-4. Confirm and the geometry updates instantly.
+## Notes for publishing
+- License: GPL-3 (included as `LICENSE.txt`).
+- Repository: https://github.com/oseyiajibare/Hole_inner
+- Tracker: https://github.com/oseyiajibare/Hole_inner/issues
 
 ---
 
-## 📷 Icon
-The plugin includes a simple icon (`icon.png`) for toolbar visibility.
+Original README content (kept below):
 
----
+```
+Hole vs Inner Polygon Detection - Advanced Plugin
+-----------------------------------------------------------
+Version: 1.2
+Author: Seyi Ajibare
 
-## 📜 Metadata
-See [metadata.txt](metadata.txt) for plugin details.
+Features (advanced prototype):
+- Contextual menu (Create Hole / Add Inner Feature / Options) when starting inside a polygon.
+- Options dialog (default mode, snapping toggle, confirmation before commit) stored via QSettings.
+- Improved live preview with translucent fill and vertex marker.
+- Attribute mapping dialog for inner features (pre-fills from parent feature where possible).
+- Basic undo-friendly behavior using layer edit sessions (startEditing / commitChanges / rollBack).
+- Logging of actions in plugin memory (plugin.tool.log).
+- Includes icon.svg (vector) and icon.png placeholder. Please replace icon.png with a real PNG if desired.
 
----
+Installation:
+1. Unzip the folder into your QGIS plugins directory (or copy the folder).
+2. Restart QGIS and enable the plugin from Plugins > Manage and Install Plugins.
+3. Use the toolbar icon or the plugin menu to activate the tool.
 
-## 🧑‍💻 Development
-Clone the repo and copy the folder into your QGIS plugins directory:
-- **Linux:** `~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/`
-- **Windows:** `C:\Users\<USER>\AppData\Roaming\QGIS\QGIS3\profiles\default\python\plugins\`
-- **Mac:** `~/Library/Application Support/QGIS/QGIS3/profiles/default/python/plugins/`
+Notes & recommended production improvements:
+- Integrate with QGIS Edit Command / UndoStack for per-action undo/redo (requires using QgsEditCommand classes).
+- Add snapping to parent boundary using QgsSnappingUtils for precise vertex placement.
+- Improve attribute form to support types, dropdowns and value validation.
+- Provide a preferences panel to choose which layers to target and to customize colors/styles.
+- Add unit tests and sample layers for QA.
 
----
-
-## 🐞 Issues
-Report bugs or request features here:  
-👉 [GitHub Issues](https://github.com/oseyiajibare/hole_inner_plugin/issues)
-
----
-
-## 📄 License
-Hole vs Inner Polygon Tool (QGIS Plugin)
-Copyright (C) 2025 Seyi Ajibare
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
+```
